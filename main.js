@@ -29,9 +29,11 @@ var WIDTH = window.innerWidth,
 	NUMAI = 5,
 	PROJECTILEDAMAGE = 20;
 // Global vars
-var t = THREE, scene, cam, renderer, controls, clock, projector, model, skin;
+var t = THREE, scene, cam1, cam2, renderer1, renderer2, controls1, controls2, clock, projector, model, skin, hasmotion=0;
 var runAnim = true, mouse = { x: 0, y: 0 }, kills = 0, health = 100;
 var healthCube, lastHealthPickup = 0;
+var alpha = 0, mot_alpha = 0, beta = 0, mot_beta = 0, gamma = 0, mot_gamma = 0, mot_x = 0, mot_y = 0, mot_z = 0;
+
 /*
 var finder = new PF.AStarFinder({ // Defaults to Manhattan heuristic
 	allowDiagonal: true,
@@ -61,22 +63,39 @@ $(document).ready(function() {
 
 // Setup
 function init() {
+	container = document.createElement( 'div' );
+	document.body.appendChild( container );
+	
+	//for some reason when going full screen the entire screen is black only, no drawing takes place
+	//container.webkitRequestFullScreen(Element.ALLOW_KEYBOARD_INPUT);
+	//container.mozRequestFullScreen();
+	
 	clock = new t.Clock(); // Used in render() for controls.update()
 	projector = new t.Projector(); // Used in bullet projection
 	scene = new t.Scene(); // Holds all objects in the canvas
 	scene.fog = new t.FogExp2(0xD6F1FF, 0.0005); // color, density
 	
 	// Set up camera
-	cam = new t.PerspectiveCamera(60, ASPECT, 1, 10000); // FOV, aspect, near, far
-	cam.position.y = UNITSIZE * .2;
-	scene.add(cam);
+	cam1 = new t.PerspectiveCamera(45, (window.innerWidth/2) / window.innerHeight, 1, 1000); // FOV, aspect, near, far
+	cam1.position.y = UNITSIZE * .2;
+	cam1.position.z = -1 * UNITSIZE * .2;
+	cam2 = new t.PerspectiveCamera(45, (window.innerWidth/2) / window.innerHeight, 1, 1000); // FOV, aspect, near, far
+	cam2.position.y = UNITSIZE * .2;
+	cam2.position.z = 1 * UNITSIZE * .2;
+	scene.add(cam1);
+	scene.add(cam2);
 	
 	// Camera moves with mouse, flies around with WASD/arrow keys
-	controls = new t.FirstPersonControls(cam);
-	controls.movementSpeed = MOVESPEED;
-	controls.lookSpeed = LOOKSPEED;
-	controls.lookVertical = false; // Temporary solution; play on flat surfaces only
-	controls.noFly = true;
+//	controls1 = new t.FirstPersonControls(cam1);
+//	controls1.movementSpeed = MOVESPEED;
+//	controls1.lookSpeed = LOOKSPEED;
+//	controls1.lookVertical = false; // Temporary solution; play on flat surfaces only
+//	controls1.noFly = true;
+//	controls2 = new t.FirstPersonControls(cam2);
+//	controls2.movementSpeed = MOVESPEED;
+//	controls2.lookSpeed = LOOKSPEED;
+//	controls2.lookVertical = false; // Temporary solution; play on flat surfaces only
+//	controls2.noFly = true;
 
 	// World objects
 	setupScene();
@@ -84,13 +103,17 @@ function init() {
 	// Artificial Intelligence
 	setupAI();
 	
-	// Handle drawing as WebGL (faster than Canvas but less supported)
-	renderer = new t.WebGLRenderer();
-	renderer.setSize(WIDTH, HEIGHT);
+	// Handle drawing as Canvas (better supported than WebGL with a loss of good texture handling and speed)
+	renderer1 = new t.CanvasRenderer();
+	renderer1.setSize( window.innerWidth/2, window.innerHeight );
+	renderer2 = new t.CanvasRenderer();
+	renderer2.setSize( window.innerWidth/2, window.innerHeight );
 	
 	// Add the canvas to the document
-	renderer.domElement.style.backgroundColor = '#D6F1FF'; // easier to see
-	document.body.appendChild(renderer.domElement);
+	renderer1.domElement.style.backgroundColor = '#D6F1FF'; // easier to see
+	renderer2.domElement.style.backgroundColor = '#D6F1FF'; // easier to see
+	container.appendChild(renderer1.domElement);
+	container.appendChild(renderer2.domElement);
 	
 	// Track mouse position so we know where to shoot
 	document.addEventListener( 'mousemove', onDocumentMouseMove, false );
@@ -106,12 +129,94 @@ function init() {
 	// Display HUD
 	$('body').append('<canvas id="radar" width="200" height="200"></canvas>');
 	$('body').append('<div id="hud"><p>Health: <span id="health">100</span><br />Score: <span id="score">0</span></p></div>');
-	$('body').append('<div id="credits"><p>Created by <a href="http://www.isaacsukin.com/">Isaac Sukin</a> using <a href="http://mrdoob.github.com/three.js/">Three.js</a><br />WASD to move, mouse to look, click to shoot</p></div>');
+	$('body').append('<div id="orientation"><p>Orientation: <span id="orient">test</span></p></div>');
+	$('body').append('<div id="credits"><p>Created by <a href="http://www.ljd2.com/">Jonathan Lussier</a> as forked from <a href="http://www.isaacsukin.com/">Isaac Sukin</a> using <a href="http://mrdoob.github.com/three.js/">Three.js</a></p></div>');
 	
 	// Set up "hurt" flash
 	$('body').append('<div id="hurt"></div>');
 	$('#hurt').css({width: WIDTH, height: HEIGHT,});
+	
+	document.addEventListener( 'mousedown', onDocumentMouseDown, false );
+	document.addEventListener( 'touchstart', onDocumentTouchStart, false );
+	document.addEventListener( 'touchmove', onDocumentTouchMove, false );
+	window.addEventListener( 'deviceorientation', onWindowDeviceOrientation, false );
+	window.addEventListener( 'devicemotion', onWindowDeviceMotion, false );
 }
+
+function onWindowDeviceOrientation( event ) {
+	beta = event.beta;   // phone orientation in degrees
+	gamma = event.gamma; // phone orientation in degrees
+	alpha = event.alpha; // phone orientation in degrees
+	hasmotion = true;
+}
+
+function onWindowDeviceMotion( event ) {
+	mot_alpha = event.rotationRate.alpha; // Rotation velocity around z-axis in deg/sec
+	mot_beta  = event.rotationRate.beta;  // Rotation velocity around x-axis in deg/sec
+	mot_gamma = event.rotationRate.gamma; // Rotation velocity around y-axis in deg/sec
+	mot_x = event.acceleration.x;  // Acceleration on x-axis in m/sec^2
+	mot_y = event.acceleration.y;  // Acceleration on y-axis in m/sec^2
+	mot_z = event.acceleration.z;  // Acceleration on z-axis in m/sec^2
+	hasmotion = true;
+}			
+
+function onDocumentMouseDown( event ) {
+
+	event.preventDefault();
+
+	document.addEventListener( 'mousemove', onDocumentMouseMove, false );
+	document.addEventListener( 'mouseup', onDocumentMouseUp, false );
+	document.addEventListener( 'mouseout', onDocumentMouseOut, false );
+
+	mouseXOnMouseDown = event.clientX - windowHalfX;
+	targetRotationOnMouseDown = targetRotation;
+}
+
+function onDocumentMouseMove( event ) {
+
+	mouseX = event.clientX - windowHalfX;
+
+	targetRotation = targetRotationOnMouseDown + ( mouseX - mouseXOnMouseDown ) * 0.02;
+}
+
+function onDocumentMouseUp( event ) {
+
+	document.removeEventListener( 'mousemove', onDocumentMouseMove, false );
+	document.removeEventListener( 'mouseup', onDocumentMouseUp, false );
+	document.removeEventListener( 'mouseout', onDocumentMouseOut, false );
+}
+
+function onDocumentMouseOut( event ) {
+
+	document.removeEventListener( 'mousemove', onDocumentMouseMove, false );
+	document.removeEventListener( 'mouseup', onDocumentMouseUp, false );
+	document.removeEventListener( 'mouseout', onDocumentMouseOut, false );
+}
+
+function onDocumentTouchStart( event ) {
+
+	if ( event.touches.length == 1 ) {
+
+		event.preventDefault();
+
+		mouseXOnMouseDown = event.touches[ 0 ].pageX - windowHalfX;
+		targetRotationOnMouseDown = targetRotation;
+
+	}
+}
+
+function onDocumentTouchMove( event ) {
+
+	if ( event.touches.length == 1 ) {
+
+		event.preventDefault();
+
+		mouseX = event.touches[ 0 ].pageX - windowHalfX;
+		targetRotation = targetRotationOnMouseDown + ( mouseX - mouseXOnMouseDown ) * 0.05;
+
+	}
+}
+
 
 // Helper function for browser frames
 function animate() {
@@ -125,14 +230,32 @@ function animate() {
 function render() {
 	var delta = clock.getDelta(), speed = delta * BULLETMOVESPEED;
 	var aispeed = delta * MOVESPEED;
-	controls.update(delta); // Move camera
+	
+	//cam1.lookAt(scene.position);
+	cam1.eulerOrder = 'ZXY';
+	cam1.rotation.x = beta * Math.PI / 180;
+	cam1.rotation.y = gamma * Math.PI / 180;
+	cam1.rotation.z = alpha * Math.PI / 180;
+	cam1.updateMatrix();
+	
+	//cam2.lookAt(scene.position);
+	cam2.eulerOrder = 'ZXY';
+	cam2.rotation.x = beta * Math.PI / 180;
+	cam2.rotation.y = gamma * Math.PI / 180;
+	cam2.rotation.z = alpha * Math.PI / 180;
+	cam2.updateMatrix();
+
+	if ( hasmotion ) {
+		$('#orient').html(alpha.toFixed(2) + ' ' + mot_alpha.toFixed(2) + ' ' + beta.toFixed(2) + ' ' + mot_beta.toFixed(2) + ' ' + gamma.toFixed(2) + ' ' + mot_gamma.toFixed(2) + ' ' + mot_x.toFixed(2) + ' ' + mot_y.toFixed(2) + ' ' + mot_z.toFixed(2) + ' ');
+	}
+	
 	
 	// Rotate the health cube
 	healthcube.rotation.x += 0.004
 	healthcube.rotation.y += 0.008;
 	// Allow picking it up once per minute
 	if (Date.now() > lastHealthPickup + 60000) {
-		if (distance(cam.position.x, cam.position.z, healthcube.position.x, healthcube.position.z) < 15 && health != 100) {
+		if (distance(cam1.position.x, cam1.position.z, healthcube.position.x, healthcube.position.z) < 15 && health != 100) {
 			health = Math.min(health + 50, 100);
 			$('#health').html(health);
 			lastHealthPickup = Date.now();
@@ -176,7 +299,7 @@ function render() {
 			}
 		}
 		// Bullet hits player
-		if (distance(p.x, p.z, cam.position.x, cam.position.z) < 25 && b.owner != cam) {
+		if (distance(p.x, p.z, cam1.position.x, cam1.position.z) < 25 && b.owner != cam1) {
 			$('#hurt').fadeIn(75);
 			health -= 10;
 			if (health < 0) health = 0;
@@ -239,20 +362,22 @@ function render() {
 			a.PathPos++;
 		}
 		*/
-		var cc = getMapSector(cam.position);
+		var cc = getMapSector(cam1.position);
 		if (Date.now() > a.lastShot + 750 && distance(c.x, c.z, cc.x, cc.z) < 2) {
 			createBullet(a);
 			a.lastShot = Date.now();
 		}
 	}
 
-	renderer.render(scene, cam); // Repaint
+	renderer1.render(scene, cam1); // Repaint
+	renderer2.render(scene, cam2); // Repaint
 	
 	// Death
 	if (health <= 0) {
 		runAnim = false;
-		$(renderer.domElement).fadeOut();
-		$('#radar, #hud, #credits').fadeOut();
+		$(renderer1.domElement).fadeOut();
+		$(renderer2.domElement).fadeOut();
+		$('#radar, #hud, #orientation, #credits').fadeOut();
 		$('#intro').fadeIn();
 		$('#intro').html('Ouch! Click to restart...');
 		$('#intro').one('click', function() {
@@ -331,7 +456,7 @@ function setupAI() {
 }
 
 function addAI() {
-	var c = getMapSector(cam.position);
+	var c = getMapSector(cam1.position); //only using cam1 position for AI at the moment
 	var aiMaterial = new t.MeshBasicMaterial({/*color: 0xEE3333,*/map: t.ImageUtils.loadTexture('images/face.png')});
 	var o = new t.Mesh(aiGeo, aiMaterial);
 	do {
@@ -411,7 +536,7 @@ function checkWallCollision(v) {
 
 // Radar
 function drawRadar() {
-	var c = getMapSector(cam.position), context = document.getElementById('radar').getContext('2d');
+	var c = getMapSector(cam1.position), context = document.getElementById('radar').getContext('2d');
 	context.font = '10px Helvetica';
 	for (var i = 0; i < mapW; i++) {
 		for (var j = 0, m = map[i].length; j < m; j++) {
@@ -455,7 +580,7 @@ var sphereMaterial = new t.MeshBasicMaterial({color: 0x333333});
 var sphereGeo = new t.SphereGeometry(2, 6, 6);
 function createBullet(obj) {
 	if (obj === undefined) {
-		obj = cam;
+		obj = cam1;
 	}
 	var sphere = new t.Mesh(sphereGeo, sphereMaterial);
 	sphere.position.set(obj.position.x, obj.position.y * 0.8, obj.position.z);
@@ -469,7 +594,7 @@ function createBullet(obj) {
 		);
 	}
 	else {
-		var vector = cam.position.clone();
+		var vector = cam1.position.clone();
 		sphere.ray = new t.Ray(
 				obj.position,
 				vector.subSelf(obj.position).normalize()
@@ -501,25 +626,39 @@ function onDocumentMouseMove(e) {
 
 // Handle window resizing
 $(window).resize(function() {
-	WIDTH = window.innerWidth;
+	WIDTH = window.innerWidth/2;
 	HEIGHT = window.innerHeight;
 	ASPECT = WIDTH / HEIGHT;
-	if (cam) {
-		cam.aspect = ASPECT;
-		cam.updateProjectionMatrix();
+	if (cam1) {
+		cam1.aspect = ASPECT;
+		cam1.updateProjectionMatrix();
 	}
-	if (renderer) {
-		renderer.setSize(WIDTH, HEIGHT);
+	if (cam2) {
+		cam2.aspect = ASPECT;
+		cam2.updateProjectionMatrix();
+	}
+	
+	if (renderer1) {
+		renderer1.setSize(WIDTH, HEIGHT);
+	}
+	if (renderer2) {
+		renderer2.setSize(WIDTH, HEIGHT);
 	}
 	$('#intro, #hurt').css({width: WIDTH, height: HEIGHT,});
 });
 
 // Stop moving around when the window is unfocused (keeps my sanity!)
 $(window).focus(function() {
-	if (controls) controls.freeze = false;
+	if (controls1) controls1.freeze = false;
 });
 $(window).blur(function() {
-	if (controls) controls.freeze = true;
+	if (controls1) controls1.freeze = true;
+});
+$(window).focus(function() {
+	if (controls2) controls2.freeze = false;
+});
+$(window).blur(function() {
+	if (controls2) controls2.freeze = true;
 });
 
 //Get a random integer between lo and hi, inclusive.
